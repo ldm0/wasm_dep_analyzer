@@ -62,6 +62,7 @@ pub enum ValueType {
   I64,
   F32,
   F64,
+  V128,
   /// A value currently not understood by this parser.
   Unknown,
 }
@@ -246,12 +247,15 @@ impl<'a> ParserState<'a> {
         }
       } else if let ExportType::Global(global) = &mut export.export_type {
         let parsed_globals = parsed_globals.get_or_insert_with(|| {
-          parse_global_section(self.globals_section.unwrap_or_default())
+          build_global_export_idx_to_global_type(
+            self.imports.as_ref(),
+            self.globals_section,
+          )
         });
         let export_index = export.index as usize;
         match &parsed_globals {
           Ok(globals) => {
-            if let Some(global_type) = globals.get(export_index) {
+            if let Some(global_type) = globals.get(&export_index) {
               *global = Ok(global_type.clone());
             }
           }
@@ -291,6 +295,37 @@ fn build_func_export_idx_to_type_idx(
   for index in parsed_functions.iter() {
     space.insert(i, *index);
     i += 1;
+  }
+  Ok(space)
+}
+
+/// Builds the global index space from imported globals followed by module
+/// globals, matching the index space used by export descriptors.
+fn build_global_export_idx_to_global_type(
+  imports: Option<&Vec<Import>>,
+  globals_section: Option<&[u8]>,
+) -> Result<HashMap<usize, GlobalType>, ParseError> {
+  let parsed_globals =
+    parse_global_section(globals_section.unwrap_or_default());
+  let parsed_globals = match parsed_globals.as_ref() {
+    Ok(globals) => globals,
+    Err(err) => return Err(err.clone()),
+  };
+  let mut space = HashMap::with_capacity(
+    imports.map(|i| i.len()).unwrap_or(0) + parsed_globals.len(),
+  );
+  let mut index = 0;
+  if let Some(imports) = imports {
+    for import in imports {
+      if let ImportType::Global(global_type) = &import.import_type {
+        space.insert(index, global_type.clone());
+        index += 1;
+      }
+    }
+  }
+  for global_type in parsed_globals {
+    space.insert(index, global_type.clone());
+    index += 1;
   }
   Ok(space)
 }
@@ -506,6 +541,7 @@ fn parse_value_type(input: &[u8]) -> ParseResult<ValueType> {
       0x7E => ValueType::I64,
       0x7D => ValueType::F32,
       0x7C => ValueType::F64,
+      0x7B => ValueType::V128,
       0x70 | 0x6F => ValueType::Unknown,
       _ => ValueType::Unknown,
     },

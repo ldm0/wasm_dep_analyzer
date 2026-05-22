@@ -419,6 +419,102 @@ fn wasm_export_const_global() {
 }
 
 #[test]
+fn wasm_export_imported_and_local_globals_use_global_index_space() {
+  let input = [
+    0x00, 0x61, 0x73, 0x6d, // magic
+    0x01, 0x00, 0x00, 0x00, // version
+    0x02, 0x0a, // import section
+    0x01, // import count
+    0x03, b'e', b'n', b'v', // module
+    0x01, b'g', // name
+    0x03, // global import
+    0x7f, // i32
+    0x01, // mutable
+    0x06, 0x06, // global section
+    0x01, // global count
+    0x7e, // i64
+    0x00, // immutable
+    0x42, 0x00, 0x0b, // i64.const 0; end
+    0x07, 0x14, // export section
+    0x02, // export count
+    0x08, b'i', b'm', b'p', b'o', b'r', b't', b'e', b'd', // name
+    0x03, // global
+    0x00, // imported global index
+    0x05, b'l', b'o', b'c', b'a', b'l', // name
+    0x03, // global
+    0x01, // local global index
+  ];
+  let module = WasmDeps::parse(&input, ParseOptions::default()).unwrap();
+  assert_eq!(
+    module,
+    WasmDeps {
+      imports: vec![Import {
+        name: "g",
+        module: "env",
+        import_type: ImportType::Global(GlobalType {
+          value_type: ValueType::I32,
+          mutability: true,
+        }),
+      }],
+      exports: vec![
+        Export {
+          name: "imported",
+          index: 0,
+          export_type: ExportType::Global(Ok(GlobalType {
+            value_type: ValueType::I32,
+            mutability: true,
+          })),
+        },
+        Export {
+          name: "local",
+          index: 1,
+          export_type: ExportType::Global(Ok(GlobalType {
+            value_type: ValueType::I64,
+            mutability: false,
+          })),
+        },
+      ],
+    }
+  );
+}
+
+#[test]
+fn wasm_export_v128_global_type() {
+  let input = [
+    0x00, 0x61, 0x73, 0x6d, // magic
+    0x01, 0x00, 0x00, 0x00, // version
+    0x06, 0x16, // global section
+    0x01, // global count
+    0x7b, // v128
+    0x00, // immutable
+    0xfd, 0x0c, // v128.const
+    0x00, 0x00, 0x00, 0x00, // lane bytes
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x0b, // end
+    0x07, 0x05, // export section
+    0x01, // export count
+    0x01, b'v', // name
+    0x03, // global
+    0x00, // index
+  ];
+  let module = WasmDeps::parse(&input, ParseOptions::default()).unwrap();
+  assert_eq!(
+    module,
+    WasmDeps {
+      imports: vec![],
+      exports: vec![Export {
+        name: "v",
+        index: 0,
+        export_type: ExportType::Global(Ok(GlobalType {
+          value_type: ValueType::V128,
+          mutability: false,
+        })),
+      }],
+    }
+  );
+}
+
+#[test]
 fn wasm_export_imported_func() {
   // (module
   //   ;; Import a function named 'external_func' from the 'env' module.
