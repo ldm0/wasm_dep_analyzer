@@ -423,13 +423,7 @@ fn parse_import_type(input: &[u8]) -> ParseResult<ImportType> {
 }
 
 fn parse_table_type(input: &[u8]) -> ParseResult<TableType> {
-  // element type
-  let (input, element_type) = read_byte(input)?;
-  if element_type != /* funref */ 0x70 {
-    return Err(ParseError::UnknownElementType(element_type));
-  }
-
-  // limits
+  let (input, element_type) = parse_ref_type(input)?;
   let (input, limits) = parse_limits(input)?;
 
   Ok((
@@ -439,6 +433,20 @@ fn parse_table_type(input: &[u8]) -> ParseResult<TableType> {
       limits,
     },
   ))
+}
+
+fn parse_ref_type(input: &[u8]) -> ParseResult<u8> {
+  let (input, ref_type) = read_byte(input)?;
+  match ref_type {
+    // funcref / externref
+    0x70 | 0x6F => Ok((input, ref_type)),
+    // ref null / ref, followed by a signed heap type.
+    0x63 | 0x64 => {
+      let (input, _) = parse_heap_type(input)?;
+      Ok((input, ref_type))
+    }
+    _ => Err(ParseError::UnknownElementType(ref_type)),
+  }
 }
 
 fn parse_memory_type(input: &[u8]) -> ParseResult<MemoryType> {
@@ -486,6 +494,11 @@ fn skip_init_expr(input: &[u8]) -> ParseResult<()> {
 
 fn parse_value_type(input: &[u8]) -> ParseResult<ValueType> {
   let (input, byte) = read_byte(input)?;
+  if matches!(byte, 0x63 | 0x64) {
+    let (input, _) = parse_heap_type(input)?;
+    return Ok((input, ValueType::Unknown));
+  }
+
   Ok((
     input,
     match byte {
@@ -493,6 +506,7 @@ fn parse_value_type(input: &[u8]) -> ParseResult<ValueType> {
       0x7E => ValueType::I64,
       0x7D => ValueType::F32,
       0x7C => ValueType::F64,
+      0x70 | 0x6F => ValueType::Unknown,
       _ => ValueType::Unknown,
     },
   ))
@@ -500,7 +514,7 @@ fn parse_value_type(input: &[u8]) -> ParseResult<ValueType> {
 
 fn parse_limits(input: &[u8]) -> ParseResult<Limits> {
   fn maybe_parse_maximum(input: &[u8], flags: u8) -> ParseResult<Option<u32>> {
-    if flags == 0x01 {
+    if flags & 0x01 != 0 {
       let (input, max) = parse_var_uint(input)?;
       Ok((input, Some(max)))
     } else {
@@ -704,6 +718,35 @@ fn parse_var_uint(input: &[u8]) -> ParseResult<u32> {
     shift += 7;
   }
   Ok((input, result))
+}
+
+/// Parse a heap type, encoded as a signed 33-bit LEB128 integer.
+fn parse_heap_type(input: &[u8]) -> ParseResult<i64> {
+  let mut result = 0i64;
+  let mut shift = 0;
+  let mut input = input;
+
+  for _ in 0..5 {
+    let (rest, byte) = read_byte(input)?;
+    input = rest;
+
+    result |= ((byte & 0x7f) as i64) << shift;
+    shift += 7;
+
+    if byte & 0x80 == 0 {
+      return Ok((input, sign_extend_leb_result(result, shift, byte)));
+    }
+  }
+
+  Err(ParseError::IntegerOverflow)
+}
+
+fn sign_extend_leb_result(result: i64, shift: u32, byte: u8) -> i64 {
+  if shift < 64 && byte & 0x40 != 0 {
+    result | (!0i64 << shift)
+  } else {
+    result
+  }
 }
 
 fn read_byte(input: &[u8]) -> ParseResult<u8> {
