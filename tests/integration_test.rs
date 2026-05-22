@@ -9,6 +9,7 @@ use wasm_dep_analyzer::GlobalType;
 use wasm_dep_analyzer::Import;
 use wasm_dep_analyzer::ImportType;
 use wasm_dep_analyzer::Limits;
+use wasm_dep_analyzer::MemoryType;
 use wasm_dep_analyzer::ParseError;
 use wasm_dep_analyzer::ParseOptions;
 use wasm_dep_analyzer::TableType;
@@ -200,6 +201,107 @@ fn wasm_import_table() {
           limits: Limits {
             initial: 2,
             maximum: None,
+          },
+        }),
+      }],
+      exports: vec![],
+    }
+  );
+}
+
+#[test]
+fn wasm_import_table_externref() {
+  let input = [
+    0x00, 0x61, 0x73, 0x6d, // magic
+    0x01, 0x00, 0x00, 0x00, // version
+    0x02, 0x0c, // import section
+    0x01, // import count
+    0x02, b'j', b's', // module
+    0x03, b't', b'b', b'l', // name
+    0x01, // table import
+    0x6f, // externref
+    0x00, // limits without maximum
+    0x02, // initial
+  ];
+  let module = WasmDeps::parse(&input, ParseOptions::default()).unwrap();
+  assert_eq!(
+    module,
+    WasmDeps {
+      imports: vec![Import {
+        name: "tbl",
+        module: "js",
+        import_type: ImportType::Table(TableType {
+          element_type: 0x6f,
+          limits: Limits {
+            initial: 2,
+            maximum: None,
+          },
+        }),
+      }],
+      exports: vec![],
+    }
+  );
+}
+
+#[test]
+fn wasm_import_table_ref_null_extern() {
+  let input = [
+    0x00, 0x61, 0x73, 0x6d, // magic
+    0x01, 0x00, 0x00, 0x00, // version
+    0x02, 0x0d, // import section
+    0x01, // import count
+    0x02, b'j', b's', // module
+    0x03, b't', b'b', b'l', // name
+    0x01, // table import
+    0x63, 0x6f, // ref null extern
+    0x00, // limits without maximum
+    0x02, // initial
+  ];
+  let module = WasmDeps::parse(&input, ParseOptions::default()).unwrap();
+  assert_eq!(
+    module,
+    WasmDeps {
+      imports: vec![Import {
+        name: "tbl",
+        module: "js",
+        import_type: ImportType::Table(TableType {
+          element_type: 0x63,
+          limits: Limits {
+            initial: 2,
+            maximum: None,
+          },
+        }),
+      }],
+      exports: vec![],
+    }
+  );
+}
+
+#[test]
+fn wasm_import_shared_memory_limits_with_maximum() {
+  let input = [
+    0x00, 0x61, 0x73, 0x6d, // magic
+    0x01, 0x00, 0x00, 0x00, // version
+    0x02, 0x0c, // import section
+    0x01, // import count
+    0x02, b'j', b's', // module
+    0x03, b'm', b'e', b'm', // name
+    0x02, // memory import
+    0x03, // limits with maximum + shared
+    0x01, // initial
+    0x02, // maximum
+  ];
+  let module = WasmDeps::parse(&input, ParseOptions::default()).unwrap();
+  assert_eq!(
+    module,
+    WasmDeps {
+      imports: vec![Import {
+        name: "mem",
+        module: "js",
+        import_type: ImportType::Memory(MemoryType {
+          limits: Limits {
+            initial: 1,
+            maximum: Some(2),
           },
         }),
       }],
