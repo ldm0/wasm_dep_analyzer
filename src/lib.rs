@@ -200,14 +200,6 @@ impl<'a> ParserState<'a> {
     let Some(exports) = &mut self.exports else {
       return;
     };
-    // nothing to fill
-    if self.types_section.is_none()
-      && self.functions_section.is_none()
-      && self.globals_section.is_none()
-    {
-      return;
-    };
-
     let mut parsed_types = None;
     let mut parsed_globals = None;
     let mut function_indexes = None;

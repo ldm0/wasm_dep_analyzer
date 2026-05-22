@@ -479,6 +479,78 @@ fn wasm_export_imported_and_local_globals_use_global_index_space() {
 }
 
 #[test]
+fn wasm_export_imported_externref_globals_use_global_index_space() {
+  let input = [
+    0x00, 0x61, 0x73, 0x6d, // magic
+    0x01, 0x00, 0x00, 0x00, // version
+    0x02, 0x27, // import section
+    0x02, // import count
+    0x18, b'w', b'a', b's', b'm', b':', b'j', b's', b'/', b's', b't', b'r',
+    b'i', b'n', b'g', b'-', b'c', b'o', b'n', b's', b't', b'a', b'n', b't',
+    b's', // module
+    0x00, // name
+    0x03, // global import
+    0x6f, // externref
+    0x00, // immutable
+    0x03, b'e', b'n', b'v', // module
+    0x01, b'g', // name
+    0x03, // global import
+    0x7f, // i32
+    0x01, // mutable
+    0x07, 0x13, // export section
+    0x02, // export count
+    0x05, b'e', b'm', b'p', b't', b'y', // name
+    0x03, // global
+    0x00, // imported externref global index
+    0x07, b'i', b'3', b'2', b'M', b'u', b't', b'G', // name
+    0x03, // global
+    0x01, // imported i32 mutable global index
+  ];
+  let module = WasmDeps::parse(&input, ParseOptions::default()).unwrap();
+  assert_eq!(
+    module,
+    WasmDeps {
+      imports: vec![
+        Import {
+          name: "",
+          module: "wasm:js/string-constants",
+          import_type: ImportType::Global(GlobalType {
+            value_type: ValueType::Unknown,
+            mutability: false,
+          }),
+        },
+        Import {
+          name: "g",
+          module: "env",
+          import_type: ImportType::Global(GlobalType {
+            value_type: ValueType::I32,
+            mutability: true,
+          }),
+        },
+      ],
+      exports: vec![
+        Export {
+          name: "empty",
+          index: 0,
+          export_type: ExportType::Global(Ok(GlobalType {
+            value_type: ValueType::Unknown,
+            mutability: false,
+          })),
+        },
+        Export {
+          name: "i32MutG",
+          index: 1,
+          export_type: ExportType::Global(Ok(GlobalType {
+            value_type: ValueType::I32,
+            mutability: true,
+          })),
+        },
+      ],
+    }
+  );
+}
+
+#[test]
 fn wasm_export_v128_global_type() {
   let input = [
     0x00, 0x61, 0x73, 0x6d, // magic
