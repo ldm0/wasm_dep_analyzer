@@ -6,6 +6,7 @@ use wasm_dep_analyzer::Export;
 use wasm_dep_analyzer::ExportType;
 use wasm_dep_analyzer::FunctionSignature;
 use wasm_dep_analyzer::GlobalType;
+use wasm_dep_analyzer::HeapType;
 use wasm_dep_analyzer::Import;
 use wasm_dep_analyzer::ImportType;
 use wasm_dep_analyzer::Limits;
@@ -197,7 +198,7 @@ fn wasm_import_table() {
         name: "table",
         module: "env",
         import_type: ImportType::Table(TableType {
-          element_type: 112,
+          element_type: ValueType::FuncRef,
           limits: Limits {
             initial: 2,
             maximum: None,
@@ -231,7 +232,7 @@ fn wasm_import_table_externref() {
         name: "tbl",
         module: "js",
         import_type: ImportType::Table(TableType {
-          element_type: 0x6f,
+          element_type: ValueType::ExternRef,
           limits: Limits {
             initial: 2,
             maximum: None,
@@ -265,7 +266,7 @@ fn wasm_import_table_ref_null_extern() {
         name: "tbl",
         module: "js",
         import_type: ImportType::Table(TableType {
-          element_type: 0x63,
+          element_type: ValueType::RefNull(HeapType::Extern),
           limits: Limits {
             initial: 2,
             maximum: None,
@@ -515,7 +516,7 @@ fn wasm_export_imported_externref_globals_use_global_index_space() {
           name: "",
           module: "wasm:js/string-constants",
           import_type: ImportType::Global(GlobalType {
-            value_type: ValueType::Unknown,
+            value_type: ValueType::ExternRef,
             mutability: false,
           }),
         },
@@ -533,7 +534,7 @@ fn wasm_export_imported_externref_globals_use_global_index_space() {
           name: "empty",
           index: 0,
           export_type: ExportType::Global(Ok(GlobalType {
-            value_type: ValueType::Unknown,
+            value_type: ValueType::ExternRef,
             mutability: false,
           })),
         },

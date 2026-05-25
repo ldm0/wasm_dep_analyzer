@@ -46,7 +46,7 @@ pub struct Limits {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct TableType {
-  pub element_type: u8,
+  pub element_type: ValueType,
   pub limits: Limits,
 }
 
@@ -62,8 +62,29 @@ pub enum ValueType {
   F32,
   F64,
   V128,
+  FuncRef,
+  ExternRef,
+  RefNull(HeapType),
+  Ref(HeapType),
   /// A value currently not understood by this parser.
   Unknown,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum HeapType {
+  Func,
+  Extern,
+  Other(i64),
+}
+
+impl HeapType {
+  fn from_raw(raw: i64) -> Self {
+    match raw {
+      -0x10 => HeapType::Func,
+      -0x11 => HeapType::Extern,
+      _ => HeapType::Other(raw),
+    }
+  }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -430,18 +451,9 @@ fn parse_table_type(input: &[u8]) -> ParseResult<TableType> {
   ))
 }
 
-fn parse_ref_type(input: &[u8]) -> ParseResult<u8> {
+fn parse_ref_type(input: &[u8]) -> ParseResult<ValueType> {
   let (input, ref_type) = read_byte(input)?;
-  match ref_type {
-    // funcref / externref
-    0x70 | 0x6F => Ok((input, ref_type)),
-    // ref null / ref, followed by a signed heap type.
-    0x63 | 0x64 => {
-      let (input, _) = parse_heap_type(input)?;
-      Ok((input, ref_type))
-    }
-    _ => Err(ParseError::UnknownElementType(ref_type)),
-  }
+  parse_ref_type_from_byte(input, ref_type)
 }
 
 fn parse_memory_type(input: &[u8]) -> ParseResult<MemoryType> {
@@ -531,22 +543,35 @@ fn skip_init_expr(input: &[u8]) -> ParseResult<()> {
 
 fn parse_value_type(input: &[u8]) -> ParseResult<ValueType> {
   let (input, byte) = read_byte(input)?;
-  if matches!(byte, 0x63 | 0x64) {
-    let (input, _) = parse_heap_type(input)?;
-    return Ok((input, ValueType::Unknown));
-  }
 
-  Ok((
-    input,
-    match byte {
-      0x7F => ValueType::I32,
-      0x7E => ValueType::I64,
-      0x7D => ValueType::F32,
-      0x7C => ValueType::F64,
-      0x7B => ValueType::V128,
-      _ => ValueType::Unknown,
-    },
-  ))
+  match byte {
+    0x7F => Ok((input, ValueType::I32)),
+    0x7E => Ok((input, ValueType::I64)),
+    0x7D => Ok((input, ValueType::F32)),
+    0x7C => Ok((input, ValueType::F64)),
+    0x7B => Ok((input, ValueType::V128)),
+    0x70 | 0x6F | 0x63 | 0x64 => parse_ref_type_from_byte(input, byte),
+    _ => Ok((input, ValueType::Unknown)),
+  }
+}
+
+fn parse_ref_type_from_byte(
+  input: &[u8],
+  ref_type: u8,
+) -> ParseResult<ValueType> {
+  match ref_type {
+    0x70 => Ok((input, ValueType::FuncRef)),
+    0x6F => Ok((input, ValueType::ExternRef)),
+    0x63 => {
+      let (input, heap_type) = parse_heap_type(input)?;
+      Ok((input, ValueType::RefNull(HeapType::from_raw(heap_type))))
+    }
+    0x64 => {
+      let (input, heap_type) = parse_heap_type(input)?;
+      Ok((input, ValueType::Ref(HeapType::from_raw(heap_type))))
+    }
+    _ => Err(ParseError::UnknownElementType(ref_type)),
+  }
 }
 
 fn parse_limits(input: &[u8]) -> ParseResult<Limits> {
