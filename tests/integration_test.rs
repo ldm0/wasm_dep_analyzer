@@ -560,7 +560,7 @@ fn wasm_export_v128_global_type() {
     0x7b, // v128
     0x00, // immutable
     0xfd, 0x0c, // v128.const
-    0x00, 0x00, 0x00, 0x00, // lane bytes
+    0x0b, 0x00, 0x00, 0x00, // lane bytes; 0x0b is data, not expr end
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
     0x0b, // end
     0x07, 0x05, // export section
@@ -655,6 +655,44 @@ fn wasm_skip_types() {
       imports: vec![],
       exports: vec![Export {
         name: "myExportedGlobal",
+        index: 0,
+        export_type: ExportType::Global(Err(ParseError::UnresolvedExportType)),
+      }],
+    }
+  );
+
+  // imported global
+  let input = [
+    0x00, 0x61, 0x73, 0x6d, // magic
+    0x01, 0x00, 0x00, 0x00, // version
+    0x02, 0x0a, // import section
+    0x01, // import count
+    0x03, b'e', b'n', b'v', // module
+    0x01, b'g', // name
+    0x03, // global import
+    0x7f, // i32
+    0x01, // mutable
+    0x07, 0x05, // export section
+    0x01, // export count
+    0x01, b'g', // name
+    0x03, // global
+    0x00, // imported global index
+  ];
+  let module =
+    WasmDeps::parse(&input, ParseOptions { skip_types: true }).unwrap();
+  assert_eq!(
+    module,
+    WasmDeps {
+      imports: vec![Import {
+        name: "g",
+        module: "env",
+        import_type: ImportType::Global(GlobalType {
+          value_type: ValueType::I32,
+          mutability: true,
+        }),
+      }],
+      exports: vec![Export {
+        name: "g",
         index: 0,
         export_type: ExportType::Global(Err(ParseError::UnresolvedExportType)),
       }],

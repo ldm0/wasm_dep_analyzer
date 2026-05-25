@@ -1,6 +1,5 @@
 // Copyright 2018-2024 the Deno authors. All rights reserved. MIT license.
 
-use std::collections::HashMap;
 use std::str::Utf8Error;
 
 use thiserror::Error;
@@ -159,36 +158,20 @@ impl<'a> ParserState<'a> {
   }
 
   pub fn set_exports(&mut self, exports: Vec<Export<'a>>) {
-    // check if there are any exports with functions or globals
-    let mut had_global_export = false;
-    let mut had_function_export = false;
-    for export in &exports {
-      match export.export_type {
-        ExportType::Function(_) => {
-          had_function_export = true;
-          if had_global_export {
-            break;
-          }
-        }
-        ExportType::Global(_) => {
-          had_global_export = true;
-          if had_function_export {
-            break;
-          }
-        }
-        _ => {}
-      }
-    }
+    let has_function_export = exports
+      .iter()
+      .any(|export| matches!(export.export_type, ExportType::Function(_)));
+    let has_global_export = exports
+      .iter()
+      .any(|export| matches!(export.export_type, ExportType::Global(_)));
 
-    if !had_function_export {
-      // no need to search for this then
+    if !has_function_export {
       self.search_for_types = false;
       self.search_for_fns = false;
       self.types_section = None;
       self.functions_section = None;
     }
-    if !had_global_export {
-      // no need to search for the globals then
+    if !has_global_export {
       self.search_for_globals = false;
       self.globals_section = None;
     }
@@ -207,8 +190,8 @@ impl<'a> ParserState<'a> {
       if let ExportType::Function(sig) = &mut export.export_type {
         let func_export_idx_to_type_idx =
           function_indexes.get_or_insert_with(|| {
-            build_func_export_idx_to_type_idx(
-              self.imports.as_ref(),
+            build_function_index_to_type_index(
+              self.imports.as_deref(),
               self.functions_section,
             )
           });
@@ -219,8 +202,9 @@ impl<'a> ParserState<'a> {
             });
             match &parsed_types {
               Ok(types) => {
+                let export_index = export.index as usize;
                 if let Some(types_index) =
-                  func_export_idx_to_type_idx.get(&export.index)
+                  func_export_idx_to_type_idx.get(export_index)
                 {
                   let types_index = *types_index as usize;
                   if types_index < types.len() {
@@ -239,15 +223,15 @@ impl<'a> ParserState<'a> {
         }
       } else if let ExportType::Global(global) = &mut export.export_type {
         let parsed_globals = parsed_globals.get_or_insert_with(|| {
-          build_global_export_idx_to_global_type(
-            self.imports.as_ref(),
+          build_global_index_to_global_type(
+            self.imports.as_deref(),
             self.globals_section,
           )
         });
         let export_index = export.index as usize;
         match &parsed_globals {
           Ok(globals) => {
-            if let Some(global_type) = globals.get(&export_index) {
+            if let Some(global_type) = globals.get(export_index) {
               *global = Ok(global_type.clone());
             }
           }
@@ -260,66 +244,48 @@ impl<'a> ParserState<'a> {
   }
 }
 
-/// Builds the function index space when iterating the function imports
-/// and then the function section to create an export index to type index map.
-fn build_func_export_idx_to_type_idx(
-  imports: Option<&Vec<Import>>,
+/// Builds the wasm function index space from imported functions followed by
+/// local functions. Export descriptors index into this combined space.
+fn build_function_index_to_type_index(
+  imports: Option<&[Import]>,
   functions_section: Option<&[u8]>,
-) -> Result<HashMap<u32, u32>, ParseError> {
+) -> Result<Vec<u32>, ParseError> {
   let parsed_functions =
-    parse_function_section(functions_section.unwrap_or_default());
-  let parsed_functions = match parsed_functions.as_ref() {
-    Ok(f) => f,
-    Err(err) => return Err(err.clone()),
-  };
-  let mut space = HashMap::with_capacity(
+    parse_function_section(functions_section.unwrap_or_default())?;
+  let mut index_space = Vec::with_capacity(
     imports.map(|i| i.len()).unwrap_or(0) + parsed_functions.len(),
   );
-  let mut i = 0;
   if let Some(imports) = imports {
     for import in imports {
-      if let ImportType::Function(final_index) = &import.import_type {
-        space.insert(i, *final_index);
-        i += 1;
+      if let ImportType::Function(type_index) = &import.import_type {
+        index_space.push(*type_index);
       }
     }
   }
-  for index in parsed_functions.iter() {
-    space.insert(i, *index);
-    i += 1;
-  }
-  Ok(space)
+  index_space.extend(parsed_functions);
+  Ok(index_space)
 }
 
-/// Builds the global index space from imported globals followed by module
-/// globals, matching the index space used by export descriptors.
-fn build_global_export_idx_to_global_type(
-  imports: Option<&Vec<Import>>,
+/// Builds the wasm global index space from imported globals followed by local
+/// globals. Export descriptors index into this combined space.
+fn build_global_index_to_global_type(
+  imports: Option<&[Import]>,
   globals_section: Option<&[u8]>,
-) -> Result<HashMap<usize, GlobalType>, ParseError> {
+) -> Result<Vec<GlobalType>, ParseError> {
   let parsed_globals =
-    parse_global_section(globals_section.unwrap_or_default());
-  let parsed_globals = match parsed_globals.as_ref() {
-    Ok(globals) => globals,
-    Err(err) => return Err(err.clone()),
-  };
-  let mut space = HashMap::with_capacity(
+    parse_global_section(globals_section.unwrap_or_default())?;
+  let mut index_space = Vec::with_capacity(
     imports.map(|i| i.len()).unwrap_or(0) + parsed_globals.len(),
   );
-  let mut index = 0;
   if let Some(imports) = imports {
     for import in imports {
       if let ImportType::Global(global_type) = &import.import_type {
-        space.insert(index, global_type.clone());
-        index += 1;
+        index_space.push(global_type.clone());
       }
     }
   }
-  for global_type in parsed_globals {
-    space.insert(index, global_type.clone());
-    index += 1;
-  }
-  Ok(space)
+  index_space.extend(parsed_globals);
+  Ok(index_space)
 }
 
 fn parse(input: &[u8], include_types: bool) -> Result<WasmDeps, ParseError> {
@@ -362,7 +328,9 @@ fn parse(input: &[u8], include_types: bool) -> Result<WasmDeps, ParseError> {
     }
   }
 
-  state.fill_type_information();
+  if include_types {
+    state.fill_type_information();
+  }
 
   Ok(WasmDeps {
     imports: state.imports.unwrap_or_default(),
@@ -503,16 +471,58 @@ fn skip_init_expr(input: &[u8]) -> ParseResult<()> {
   let mut input = input;
 
   loop {
-    if input.is_empty() {
-      return Err(ParseError::UnexpectedEof);
-    }
-
     let (next_input, opcode) = read_byte(input)?;
     input = next_input;
 
-    // end op code
-    if opcode == 0x0b {
-      break;
+    match opcode {
+      // end
+      0x0b => break,
+      // i32.const
+      0x41 => {
+        let (rest, _) = skip_leb128(input, 5)?;
+        input = rest;
+      }
+      // i64.const
+      0x42 => {
+        let (rest, _) = skip_leb128(input, 10)?;
+        input = rest;
+      }
+      // f32.const
+      0x43 => {
+        let (rest, _) = skip_bytes(input, 4)?;
+        input = rest;
+      }
+      // f64.const
+      0x44 => {
+        let (rest, _) = skip_bytes(input, 8)?;
+        input = rest;
+      }
+      // global.get
+      0x23 => {
+        let (rest, _) = parse_var_uint(input)?;
+        input = rest;
+      }
+      // ref.null
+      0xd0 => {
+        let (rest, _) = parse_heap_type(input)?;
+        input = rest;
+      }
+      // ref.func
+      0xd2 => {
+        let (rest, _) = parse_var_uint(input)?;
+        input = rest;
+      }
+      // SIMD prefix. v128.const is the const-expression case we need to skip.
+      0xfd => {
+        let (rest, simd_opcode) = parse_var_uint(input)?;
+        if simd_opcode == 0x0c {
+          let (rest, _) = skip_bytes(rest, 16)?;
+          input = rest;
+        } else {
+          return skip_until_init_expr_end(rest);
+        }
+      }
+      _ => return skip_until_init_expr_end(input),
     }
   }
 
@@ -534,7 +544,6 @@ fn parse_value_type(input: &[u8]) -> ParseResult<ValueType> {
       0x7D => ValueType::F32,
       0x7C => ValueType::F64,
       0x7B => ValueType::V128,
-      0x70 | 0x6F => ValueType::Unknown,
       _ => ValueType::Unknown,
     },
   ))
@@ -746,6 +755,37 @@ fn parse_var_uint(input: &[u8]) -> ParseResult<u32> {
     shift += 7;
   }
   Ok((input, result))
+}
+
+fn skip_leb128(input: &[u8], max_bytes: usize) -> ParseResult<()> {
+  let mut input = input;
+  for _ in 0..max_bytes {
+    let (rest, byte) = read_byte(input)?;
+    input = rest;
+    if byte & 0x80 == 0 {
+      return Ok((input, ()));
+    }
+  }
+  Err(ParseError::IntegerOverflow)
+}
+
+fn skip_bytes(input: &[u8], count: usize) -> ParseResult<()> {
+  if input.len() < count {
+    return Err(ParseError::UnexpectedEof);
+  }
+  Ok((&input[count..], ()))
+}
+
+fn skip_until_init_expr_end(input: &[u8]) -> ParseResult<()> {
+  let mut input = input;
+
+  loop {
+    let (rest, byte) = read_byte(input)?;
+    input = rest;
+    if byte == 0x0b {
+      return Ok((input, ()));
+    }
+  }
 }
 
 /// Parse a heap type, encoded as a signed 33-bit LEB128 integer.
